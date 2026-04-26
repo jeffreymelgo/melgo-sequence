@@ -3,8 +3,6 @@
 
 //@version=6
 
-// A formal research paper has been submitted to Technical Analysis of
-// Stocks & Commodities magazine for consideration.
 // ═══════════════════════════════════════════════════════════════════
 // MELGO SEQUENCE — Price Structure Classifier (Public Release)
 // ═══════════════════════════════════════════════════════════════════
@@ -97,6 +95,9 @@
 //
 // A formal research paper is in preparation for submission to
 // Technical Analysis of Stocks & Commodities magazine.
+//
+// A formal research paper has been submitted to Technical Analysis of
+// Stocks & Commodities magazine for consideration.
 //
 // ───────────────────────────────────────────────────────────────────
 // INTELLECTUAL PROPERTY NOTICE

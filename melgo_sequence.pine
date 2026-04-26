@@ -1,0 +1,530 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Jeff Rey Melgo
+
+//@version=6
+
+// A formal research paper has been submitted to Technical Analysis of
+// Stocks & Commodities magazine for consideration.
+// ═══════════════════════════════════════════════════════════════════
+// MELGO SEQUENCE — Price Structure Classifier (Public Release)
+// ═══════════════════════════════════════════════════════════════════
+//
+// Original work by Jeff Rey Melgo  |  @JeffMelgo on TradingView
+// All rights reserved. Unauthorized redistribution, resale, or
+// republication of this script — in whole or in part — is strictly
+// prohibited without the express written consent of the author.
+//
+// ───────────────────────────────────────────────────────────────────
+// WHAT THIS IS
+// ───────────────────────────────────────────────────────────────────
+// Melgo Sequence is a price-structure classification engine.
+// It does not predict. It qualifies.
+//
+// Most traders lose not because they pick the wrong direction —
+// they lose because they trade in conditions where direction
+// cannot be reliably read. This system was built to solve that
+// problem first.
+//
+// This is the PUBLIC CLASSIFIER RELEASE — the conceptual core of
+// the system. It includes the four-timeframe state classification
+// and dashboard only.
+//
+// Sweep signals, breakout signals, zone levels, and structure
+// levels are part of the full proprietary system (invite-only).
+//
+// ───────────────────────────────────────────────────────────────────
+// CONCEPT
+// ───────────────────────────────────────────────────────────────────
+// Three derived price levels are extracted from every completed
+// higher-timeframe candle and ranked against each other:
+//
+//   · HL2   → Neutral Anchor (NA)
+//             Pure range midpoint. No open/close bias.
+//             The mechanical center of price action.
+//
+//   · HLC3  → Structural Core (SC)
+//             Close-weighted value area. Reflects where price
+//             actually settled relative to the full range.
+//
+//   · OHLC4 → FakeOut Threshold (FOT)
+//             Open-inclusive average. Captures the candle's full
+//             intent — separates genuine breaks from traps.
+//
+// Their relative ordering produces six structural states:
+//
+//   HLC3 > HL2 > OHLC4  →  Bull Trend
+//   OHLC4 > HL2 > HLC3  →  Bear Trend
+//   HLC3 > OHLC4 > HL2  →  Bull Rejection
+//   HL2 > HLC3 > OHLC4  →  Bear Indecision
+//   OHLC4 > HLC3 > HL2  →  Distribution
+//   HL2 > OHLC4 > HLC3  →  Accumulation
+//
+// Degenerate states (two or more levels equal) are flagged with *
+// These are structurally inconclusive. Do not trade them full size.
+//
+// ───────────────────────────────────────────────────────────────────
+// HOW EDGE IS BUILT
+// ───────────────────────────────────────────────────────────────────
+// A single timeframe classification gives you a slight edge over
+// random. That edge only becomes meaningful when:
+//
+//   1. Two or more timeframes align in the same structural state
+//   2. A Sweep or Breakout confirms on the lower timeframe
+//   3. Spread % is above 2.0 on all aligned timeframes
+//      (below 2.0% means the candle lacked range separation —
+//       the classification is valid but conviction is low)
+//
+// When all three conditions are met, you are working with the
+// highest-probability context this system can produce.
+// Treat everything else as a read, not a reason to enter.
+//
+// ───────────────────────────────────────────────────────────────────
+// WHAT INVALIDATES THE READ
+// ───────────────────────────────────────────────────────────────────
+// · Macro news — fundamentals override all structure, always
+// · Degen / Doji state on the higher timeframe — flagged with *
+// · Lower TF signal running against the Macro state — noise
+// · Streak count running 8+ candles — closer to rotation
+// · Spread below 2.0% — low separation, low conviction
+//
+// ───────────────────────────────────────────────────────────────────
+// RESEARCH BASIS
+// ───────────────────────────────────────────────────────────────────
+// The Melgo Sequence classification system has been validated
+// across eight phases of structured backtesting covering four
+// instruments — SPY, NQ, EURUSD, and BTCUSD — with approximately
+// 20,000 base candles tested under controlled confluence conditions.
+//
+// A formal research paper is in preparation for submission to
+// Technical Analysis of Stocks & Commodities magazine.
+//
+// ───────────────────────────────────────────────────────────────────
+// INTELLECTUAL PROPERTY NOTICE
+// ───────────────────────────────────────────────────────────────────
+// The Melgo Sequence classification system — including the NA / SC /
+// FOT naming convention, the six-state sequence logic, and the
+// signal framework built upon it — is the original, independent
+// intellectual work of Jeff Rey Melgo, developed outside of any
+// employment relationship and not derived from any third-party system.
+//
+// Published on TradingView under Mozilla Public License 2.0.
+// Personal use only. Commercial use, white-labeling, or inclusion
+// in paid products requires explicit written authorization.
+//
+// Contact: @JeffMelgo on TradingView
+// ═══════════════════════════════════════════════════════════════════
+
+indicator("MELGO SEQUENCE — Classifier (Public)", overlay=true, max_labels_count=500)
+
+// ═══════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════
+getSize(s) =>
+    switch s
+        "Tiny"  => size.tiny
+        "Small" => size.small
+        "Large" => size.large
+        "Huge"  => size.huge
+        =>         size.normal
+
+tfToRes(tf) =>
+    switch tf
+        "1m"  => "1"
+        "3m"  => "3"
+        "5m"  => "5"
+        "10m" => "10"
+        "15m" => "15"
+        "30m" => "30"
+        "1H"  => "60"
+        "2H"  => "120"
+        "4H"  => "240"
+        "1D"  => "D"
+        "1W"  => "W"
+        "1M"  => "M"
+        "3M"  => "3M"
+        "12M" => "12M"
+        =>       tf
+
+tfInitial(tf) =>
+    switch tf
+        "1m"  => "1m"
+        "3m"  => "3m"
+        "5m"  => "5m"
+        "10m" => "10m"
+        "15m" => "15m"
+        "30m" => "30m"
+        "1H"  => "1H"
+        "2H"  => "2H"
+        "4H"  => "4H"
+        "1D"  => "D"
+        "1W"  => "W"
+        "1M"  => "Mo"
+        "3M"  => "Q"
+        "12M" => "Y"
+        =>       tf
+
+// ═══════════════════════════════════════════════════════════════════
+// MELGO SEQUENCE CLASSIFIER
+// ═══════════════════════════════════════════════════════════════════
+melgoClassify(hl2v, hlc3v, ohlc4v, hiR, loR) =>
+    A = hl2v
+    B = hlc3v
+    C = ohlc4v
+    isTrueDoji = (B == A) and (A == C)
+    isDegen    = (B == A) or (A == C) or (B == C)
+    seqTxt = B >= A and A >= C ? "HLC3>HL2>OHLC4" :
+             C >= A and A >= B ? "OHLC4>HL2>HLC3" :
+             B >= C and C >= A ? "HLC3>OHLC4>HL2" :
+             A >= B and B >= C ? "HL2>HLC3>OHLC4" :
+             C >= B and B >= A ? "OHLC4>HLC3>HL2" :
+                                 "HL2>OHLC4>HLC3"
+    biasTxtBase = switch seqTxt
+        "HLC3>HL2>OHLC4" => "Bull Trend"
+        "OHLC4>HL2>HLC3" => "Bear Trend"
+        "HLC3>OHLC4>HL2" => "Bull Rejection"
+        "HL2>HLC3>OHLC4" => "Bear Indecision"
+        "OHLC4>HLC3>HL2" => "Distribution"
+        "HL2>OHLC4>HLC3" => "Accumulation"
+        =>                   "---"
+    biasTxt = isTrueDoji ? "True Doji" : isDegen ? biasTxtBase + "*" : biasTxtBase
+    seqInitials = switch seqTxt
+        "HLC3>HL2>OHLC4" => "SC>NA>FOT"
+        "OHLC4>HL2>HLC3" => "FOT>NA>SC"
+        "HLC3>OHLC4>HL2" => "SC>FOT>NA"
+        "HL2>HLC3>OHLC4" => "NA>SC>FOT"
+        "OHLC4>HLC3>HL2" => "FOT>SC>NA"
+        "HL2>OHLC4>HLC3" => "NA>FOT>SC"
+        =>                   "---"
+    dimC = color.new(#787b86, 0)
+    biasColClean = switch seqTxt
+        "HLC3>HL2>OHLC4" => color.new(#26a69a, 0)
+        "OHLC4>HL2>HLC3" => color.new(#ef5350, 0)
+        "HLC3>OHLC4>HL2" => color.new(#378ADD, 0)
+        "HL2>HLC3>OHLC4" => color.new(#ef9f27, 0)
+        "OHLC4>HLC3>HL2" => color.new(#ff6d00, 0)
+        "HL2>OHLC4>HLC3" => color.new(#7c4dff, 0)
+        =>                   dimC
+    biasCol    = isDegen ? dimC : biasColClean
+    barRange   = hiR - loR
+    zoneSpread = math.max(A, B, C) - math.min(A, B, C)
+    spreadPct  = barRange > 0 ? (zoneSpread / barRange) * 100 : 0
+    [seqTxt, biasTxt, biasCol, seqInitials, spreadPct, isDegen, isTrueDoji]
+
+// ═══════════════════════════════════════════════════════════════════
+// MASTER TOGGLES
+// ═══════════════════════════════════════════════════════════════════
+masterDash  = input.bool(true, "-- Dashboard --",      group="MELGO -- Master Toggles")
+masterZones = input.bool(true, "-- Melgo Sequence --", group="MELGO -- Master Toggles")
+
+// ═══════════════════════════════════════════════════════════════════
+// TIMEFRAMES
+// ═══════════════════════════════════════════════════════════════════
+htf     = input.string("4H",  "Macro TF",            options=["1m","3m","5m","10m","15m","30m","1H","2H","4H","1D","1W","1M","3M","12M"], group="MELGO -- Timeframes")
+ltf1    = input.string("1H",  "Bias TF",             options=["1m","3m","5m","10m","15m","30m","1H","2H","4H","1D","1W","1M","3M","12M"], group="MELGO -- Timeframes")
+microTF = input.string("15m", "Micro TF",            options=["1m","3m","5m","10m","15m","30m","1H","2H","4H","1D","1W","1M","3M","12M"], group="MELGO -- Timeframes")
+tf4     = input.string("1D",  "TF4 (Context Guide)", options=["1m","3m","5m","10m","15m","30m","1H","2H","4H","1D","1W","1M","3M","12M"], group="MELGO -- Timeframes")
+
+htfRes     = tfToRes(htf)
+ltf1Res    = tfToRes(ltf1)
+microTFRes = tfToRes(microTF)
+tf4Res     = tfToRes(tf4)
+
+// ═══════════════════════════════════════════════════════════════════
+// COLORS — TF palette
+// ═══════════════════════════════════════════════════════════════════
+lvlC1 = input.color(color.new(#ffee58, 0), "Macro Color", group="MELGO -- Colors")
+lvlC2 = input.color(color.new(#f23645, 0), "Bias Color",  group="MELGO -- Colors")
+lvlC3 = input.color(color.new(#4caf50, 0), "Micro Color", group="MELGO -- Colors")
+lvlC4 = input.color(color.new(#2962ff, 0), "TF4 Color",   group="MELGO -- Colors")
+
+// ═══════════════════════════════════════════════════════════════════
+// MELGO SEQUENCE SETTINGS
+// ═══════════════════════════════════════════════════════════════════
+showSeqSigs  = input.bool(true, "Show Sequence State Labels", group="MELGO -- Sequence")
+showSeqMacro = input.bool(true, "  Macro TF",                 group="MELGO -- Sequence")
+showSeqBias  = input.bool(true, "  Bias TF",                  group="MELGO -- Sequence")
+showSeqMicro = input.bool(true, "  Micro TF",                 group="MELGO -- Sequence")
+showSeqTF4   = input.bool(true, "  TF4 (guide only)",         group="MELGO -- Sequence")
+
+// Macro icons
+seqMacroSize       = input.string("Large",  "Macro Label Size", options=["Tiny","Small","Normal","Large","Huge"], group="MELGO -- Sequence")
+seqMacroBullTrendI = input.string("🅣", "Macro Bull Trend Icon",      group="MELGO -- Sequence")
+seqMacroBearTrendI = input.string("🅑", "Macro Bear Trend Icon",      group="MELGO -- Sequence")
+seqMacroBullRejI   = input.string("🅡", "Macro Bull Rejection Icon",  group="MELGO -- Sequence")
+seqMacroBearIndI   = input.string("🅘", "Macro Bear Indecision Icon", group="MELGO -- Sequence")
+seqMacroDistI      = input.string("🅓", "Macro Distribution Icon",    group="MELGO -- Sequence")
+seqMacroAccumI     = input.string("🅐", "Macro Accumulation Icon",    group="MELGO -- Sequence")
+seqMacroDegenI     = input.string("�", "Macro Degen/Doji Icon",      group="MELGO -- Sequence")
+
+// Bias icons
+seqBiasSize        = input.string("Normal", "Bias Label Size",  options=["Tiny","Small","Normal","Large","Huge"], group="MELGO -- Sequence")
+seqBiasBullTrendI  = input.string("🅣", "Bias Bull Trend Icon",       group="MELGO -- Sequence")
+seqBiasBearTrendI  = input.string("🅑", "Bias Bear Trend Icon",       group="MELGO -- Sequence")
+seqBiasBullRejI    = input.string("🅡", "Bias Bull Rejection Icon",   group="MELGO -- Sequence")
+seqBiasBearIndI    = input.string("🅘", "Bias Bear Indecision Icon",  group="MELGO -- Sequence")
+seqBiasDistI       = input.string("🅓", "Bias Distribution Icon",     group="MELGO -- Sequence")
+seqBiasAccumI      = input.string("🅐", "Bias Accumulation Icon",     group="MELGO -- Sequence")
+seqBiasDegenI      = input.string("�", "Bias Degen/Doji Icon",       group="MELGO -- Sequence")
+
+// Micro icons
+seqMicroSize       = input.string("Tiny",   "Micro Label Size", options=["Tiny","Small","Normal","Large","Huge"], group="MELGO -- Sequence")
+seqMicroBullTrendI = input.string("🅣", "Micro Bull Trend Icon",      group="MELGO -- Sequence")
+seqMicroBearTrendI = input.string("🅑", "Micro Bear Trend Icon",      group="MELGO -- Sequence")
+seqMicroBullRejI   = input.string("🅡", "Micro Bull Rejection Icon",  group="MELGO -- Sequence")
+seqMicroBearIndI   = input.string("🅘", "Micro Bear Indecision Icon", group="MELGO -- Sequence")
+seqMicroDistI      = input.string("🅓", "Micro Distribution Icon",    group="MELGO -- Sequence")
+seqMicroAccumI     = input.string("🅐", "Micro Accumulation Icon",    group="MELGO -- Sequence")
+seqMicroDegenI     = input.string("�", "Micro Degen/Doji Icon",      group="MELGO -- Sequence")
+
+// TF4 icons
+seqTF4Size         = input.string("Huge",   "TF4 Label Size",   options=["Tiny","Small","Normal","Large","Huge"], group="MELGO -- Sequence")
+seqTF4BullTrendI   = input.string("🅣", "TF4 Bull Trend Icon",        group="MELGO -- Sequence")
+seqTF4BearTrendI   = input.string("🅑", "TF4 Bear Trend Icon",        group="MELGO -- Sequence")
+seqTF4BullRejI     = input.string("🅡", "TF4 Bull Rejection Icon",    group="MELGO -- Sequence")
+seqTF4BearIndI     = input.string("🅘", "TF4 Bear Indecision Icon",   group="MELGO -- Sequence")
+seqTF4DistI        = input.string("🅓", "TF4 Distribution Icon",      group="MELGO -- Sequence")
+seqTF4AccumI       = input.string("🅐", "TF4 Accumulation Icon",      group="MELGO -- Sequence")
+seqTF4DegenI       = input.string("�", "TF4 Degen/Doji Icon",        group="MELGO -- Sequence")
+
+// ═══════════════════════════════════════════════════════════════════
+// DASHBOARD SETTINGS
+// ═══════════════════════════════════════════════════════════════════
+dashPos      = input.string("Bottom Right", "Position", options=["Top Right","Top Left","Bottom Right","Bottom Left"], group="MELGO -- Dashboard")
+dashTxtSize  = input.string("Tiny", "Text Size", options=["Tiny","Small","Normal"], group="MELGO -- Dashboard")
+dashBgColor  = input.color(color.new(#06080f,  5), "Background", group="MELGO -- Dashboard")
+dashHdrColor = input.color(color.new(#0d1018,  0), "Header BG",  group="MELGO -- Dashboard")
+dashRowA     = input.color(color.new(#0b0e16,  0), "Row A BG",   group="MELGO -- Dashboard")
+dashRowB     = input.color(color.new(#080b12,  0), "Row B BG",   group="MELGO -- Dashboard")
+dashTxtColor = input.color(color.new(#c8cdd8,  0), "Text",       group="MELGO -- Dashboard")
+dashDimColor = input.color(color.new(#5a6278,  0), "Dim",        group="MELGO -- Dashboard")
+dashBrdColor = input.color(color.new(#0a0c14,  0), "Border",     group="MELGO -- Dashboard")
+
+// ═══════════════════════════════════════════════════════════════════
+// EFFECTIVE FLAGS
+// ═══════════════════════════════════════════════════════════════════
+showSeqSigsEff = masterZones and showSeqSigs
+
+// ═══════════════════════════════════════════════════════════════════
+// DATA RETRIEVAL
+// ═══════════════════════════════════════════════════════════════════
+getPrev(tf) =>
+    hl2v   = request.security(syminfo.tickerid, tf, hl2)
+    hlc3v  = request.security(syminfo.tickerid, tf, hlc3)
+    ohlc4v = request.security(syminfo.tickerid, tf, ohlc4)
+    h      = request.security(syminfo.tickerid, tf, high)
+    l      = request.security(syminfo.tickerid, tf, low)
+    newBar = ta.change(time(tf)) != 0
+    var float phl2 = na, var float phlc3 = na, var float pohlc4 = na
+    var float ph   = na, var float pl    = na
+    if newBar
+        phl2   := hl2v[1]
+        phlc3  := hlc3v[1]
+        pohlc4 := ohlc4v[1]
+        ph     := h[1]
+        pl     := l[1]
+    [phl2, phlc3, pohlc4, ph, pl, newBar]
+
+getTF4(tf) =>
+    hl2v   = request.security(syminfo.tickerid, tf, hl2)
+    hlc3v  = request.security(syminfo.tickerid, tf, hlc3)
+    ohlc4v = request.security(syminfo.tickerid, tf, ohlc4)
+    h      = request.security(syminfo.tickerid, tf, high)
+    l      = request.security(syminfo.tickerid, tf, low)
+    newBar = ta.change(time(tf)) != 0
+    var float phl2 = na, var float phlc3 = na, var float pohlc4 = na
+    var float ph   = na, var float pl    = na
+    if newBar
+        phl2   := hl2v[1]
+        phlc3  := hlc3v[1]
+        pohlc4 := ohlc4v[1]
+        ph     := h[1]
+        pl     := l[1]
+    [phl2, phlc3, pohlc4, ph, pl, newBar]
+
+[hl21,   hlc31,   ohlc41,   h1,   l1,   nb1] = getPrev(htfRes)
+[hl22,   hlc32,   ohlc42,   h2,   l2,   nb2] = getPrev(ltf1Res)
+[hl23,   hlc33,   ohlc43,   h3,   l3,   nb3] = getPrev(microTFRes)
+[tf4HL2, tf4HLC3, tf4OHLC4, tf4H, tf4L, nb4] = getTF4(tf4Res)
+
+// ═══════════════════════════════════════════════════════════════════
+// CLASSIFY ALL 4 TFs
+// ═══════════════════════════════════════════════════════════════════
+[seq1, bias1, biasCol1, seqInit1, spread1, isDegen1, isTrueDoji1] = melgoClassify(hl21,   hlc31,   ohlc41,   h1,   l1)
+[seq2, bias2, biasCol2, seqInit2, spread2, isDegen2, isTrueDoji2] = melgoClassify(hl22,   hlc32,   ohlc42,   h2,   l2)
+[seq3, bias3, biasCol3, seqInit3, spread3, isDegen3, isTrueDoji3] = melgoClassify(hl23,   hlc33,   ohlc43,   h3,   l3)
+[seq4, bias4, biasCol4, seqInit4, spread4, isDegen4, isTrueDoji4] = melgoClassify(tf4HL2, tf4HLC3, tf4OHLC4, tf4H, tf4L)
+
+// ═══════════════════════════════════════════════════════════════════
+// STREAK COUNTERS
+// ═══════════════════════════════════════════════════════════════════
+var string pS1 = "", var string pS2 = "", var string pS3 = "", var string pS4 = ""
+var int streak1 = 0, var int streak2 = 0, var int streak3 = 0, var int streak4 = 0
+streak1 := seq1 == pS1 ? streak1 + 1 : 1
+streak2 := seq2 == pS2 ? streak2 + 1 : 1
+streak3 := seq3 == pS3 ? streak3 + 1 : 1
+streak4 := seq4 == pS4 ? streak4 + 1 : 1
+pS1 := seq1, pS2 := seq2, pS3 := seq3, pS4 := seq4
+
+// ═══════════════════════════════════════════════════════════════════
+// HELPER FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════
+seqBullF(s) => s == "HLC3>HL2>OHLC4" or s == "HLC3>OHLC4>HL2" or s == "HL2>OHLC4>HLC3"
+
+skDot(sk) => sk >= 3 ? "+" : sk == 2 ? "~" : "o"
+
+seqConvStr(spd, isDg, isTD) =>
+    isTD ? "Doji" : isDg ? "Degen" : spd < 2.0 ? "Low" : spd < 6.0 ? "Mid" : "Str"
+
+seqIconForTF(seq, isDegen, isTDoji,
+             bullTrendI, bearTrendI, bullRejI, bearIndI, distI, accumI, degenI) =>
+    if isTDoji or isDegen
+        degenI
+    else
+        switch seq
+            "HLC3>HL2>OHLC4" => bullTrendI
+            "OHLC4>HL2>HLC3" => bearTrendI
+            "HLC3>OHLC4>HL2" => bullRejI
+            "HL2>HLC3>OHLC4" => bearIndI
+            "OHLC4>HLC3>HL2" => distI
+            "HL2>OHLC4>HLC3" => accumI
+            =>                   degenI
+
+// ═══════════════════════════════════════════════════════════════════
+// RENDERING — SEQUENCE STATE LABELS
+// ═══════════════════════════════════════════════════════════════════
+if showSeqSigsEff
+    if showSeqMacro and nb1 and not na(hlc31)
+        ic  = seqIconForTF(seq1, isDegen1, isTrueDoji1,
+                           seqMacroBullTrendI, seqMacroBearTrendI,
+                           seqMacroBullRejI,   seqMacroBearIndI,
+                           seqMacroDistI,      seqMacroAccumI, seqMacroDegenI)
+        col = isDegen1 or isTrueDoji1 ? color.new(#787b86, 0) : biasCol1
+        yL  = seqBullF(seq1) ? yloc.belowbar : yloc.abovebar
+        tip = "MACRO [" + htf + "]  " + bias1 +
+              "\nSeq: " + seqInit1 +
+              " | Streak: x" + str.tostring(streak1) + skDot(streak1) +
+              "\nSpread: " + str.tostring(math.round(spread1, 1)) +
+              "% | Conv: " + seqConvStr(spread1, isDegen1, isTrueDoji1) +
+              "\nNA=HL2  SC=HLC3  FOT=OHLC4"
+        label.new(bar_index, close, ic,
+                  style=label.style_none, textcolor=col,
+                  yloc=yL, size=getSize(seqMacroSize), tooltip=tip)
+
+    if showSeqBias and nb2 and not na(hlc32)
+        ic  = seqIconForTF(seq2, isDegen2, isTrueDoji2,
+                           seqBiasBullTrendI, seqBiasBearTrendI,
+                           seqBiasBullRejI,   seqBiasBearIndI,
+                           seqBiasDistI,      seqBiasAccumI, seqBiasDegenI)
+        col = isDegen2 or isTrueDoji2 ? color.new(#787b86, 0) : biasCol2
+        yL  = seqBullF(seq2) ? yloc.belowbar : yloc.abovebar
+        tip = "BIAS [" + ltf1 + "]  " + bias2 +
+              "\nSeq: " + seqInit2 +
+              " | Streak: x" + str.tostring(streak2) + skDot(streak2) +
+              "\nSpread: " + str.tostring(math.round(spread2, 1)) +
+              "% | Conv: " + seqConvStr(spread2, isDegen2, isTrueDoji2)
+        label.new(bar_index, close, ic,
+                  style=label.style_none, textcolor=col,
+                  yloc=yL, size=getSize(seqBiasSize), tooltip=tip)
+
+    if showSeqMicro and nb3 and not na(hlc33)
+        ic  = seqIconForTF(seq3, isDegen3, isTrueDoji3,
+                           seqMicroBullTrendI, seqMicroBearTrendI,
+                           seqMicroBullRejI,   seqMicroBearIndI,
+                           seqMicroDistI,      seqMicroAccumI, seqMicroDegenI)
+        col = isDegen3 or isTrueDoji3 ? color.new(#787b86, 0) : biasCol3
+        yL  = seqBullF(seq3) ? yloc.belowbar : yloc.abovebar
+        tip = "MICRO [" + microTF + "]  " + bias3 +
+              "\nSeq: " + seqInit3 +
+              " | Streak: x" + str.tostring(streak3) + skDot(streak3) +
+              "\nSpread: " + str.tostring(math.round(spread3, 1)) +
+              "% | Conv: " + seqConvStr(spread3, isDegen3, isTrueDoji3)
+        label.new(bar_index, close, ic,
+                  style=label.style_none, textcolor=col,
+                  yloc=yL, size=getSize(seqMicroSize), tooltip=tip)
+
+    if showSeqTF4 and nb4 and not na(tf4HLC3)
+        ic  = seqIconForTF(seq4, isDegen4, isTrueDoji4,
+                           seqTF4BullTrendI, seqTF4BearTrendI,
+                           seqTF4BullRejI,   seqTF4BearIndI,
+                           seqTF4DistI,      seqTF4AccumI, seqTF4DegenI)
+        col = isDegen4 or isTrueDoji4 ? color.new(#787b86, 0) : color.new(biasCol4, 40)
+        yL  = seqBullF(seq4) ? yloc.belowbar : yloc.abovebar
+        tip = "TF4 [" + tf4 + "]  GUIDE ONLY  " + bias4 +
+              "\nSeq: " + seqInit4 +
+              " | Streak: x" + str.tostring(streak4) + skDot(streak4) +
+              "\nSpread: " + str.tostring(math.round(spread4, 1)) + "%"
+        label.new(bar_index, close, ic,
+                  style=label.style_none, textcolor=col,
+                  yloc=yL, size=getSize(seqTF4Size), tooltip=tip)
+
+// ═══════════════════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════════════════
+getDashPos(p) =>
+    switch p
+        "Top Left"     => position.top_left
+        "Bottom Right" => position.bottom_right
+        "Bottom Left"  => position.bottom_left
+        =>               position.top_right
+
+getDashSz(s) =>
+    switch s
+        "Small"  => size.small
+        "Normal" => size.normal
+        =>          size.tiny
+
+var table dash = table.new(getDashPos(dashPos), 5, 6,
+                           bgcolor=dashBgColor, border_color=dashBrdColor,
+                           border_width=1, frame_color=dashBrdColor, frame_width=1)
+
+tc(col, row, txt, fg, bg, sz, ha) =>
+    table.cell(dash, col, row, txt,
+               text_color=fg, bgcolor=bg, text_size=sz, text_halign=ha)
+
+if barstate.islast
+    table.set_position(dash, getDashPos(dashPos))
+
+if barstate.islast and masterDash
+    sz   = getDashSz(dashTxtSize)
+    rA   = dashRowA
+    rB   = dashRowB
+    hdr  = dashHdrColor
+    txt  = dashTxtColor
+    dim  = dashDimColor
+    dimC = color.new(#787b86, 0)
+    wC   = color.new(#e8c020, 0)
+
+    table.merge_cells(dash, 0, 0, 4, 0)
+    tc(0, 0, "MELGO SEQUENCE  |  @JeffMelgo", txt, hdr, size.small, text.align_center)
+
+    tc(0, 1, "tf",    dim, hdr, size.tiny, text.align_left)
+    tc(1, 1, "state", dim, hdr, size.tiny, text.align_left)
+    tc(2, 1, "seq",   dim, hdr, size.tiny, text.align_left)
+    tc(3, 1, "sk",    dim, hdr, size.tiny, text.align_right)
+    tc(4, 1, "spd%",  dim, hdr, size.tiny, text.align_right)
+
+    tfLbls  = array.from(htf,      ltf1,     microTF,  tf4)
+    tfCols  = array.from(lvlC1,    lvlC2,    lvlC3,    color.new(lvlC4, 40))
+    biasArr = array.from(bias1,    bias2,    bias3,    bias4 + " g")
+    bColArr = array.from(biasCol1, biasCol2, biasCol3, color.new(biasCol4, 40))
+    initArr = array.from(seqInit1, seqInit2, seqInit3, seqInit4)
+    strkArr = array.from(streak1,  streak2,  streak3,  streak4)
+    spdArr  = array.from(spread1,  spread2,  spread3,  spread4)
+    dgArr   = array.from(isDegen1, isDegen2, isDegen3, isDegen4)
+
+    for i = 0 to 3
+        rw     = 2 + i
+        bg     = i % 2 == 0 ? rB : rA
+        sk     = array.get(strkArr, i)
+        spd    = array.get(spdArr,  i)
+        dg     = array.get(dgArr,   i)
+        bC     = dg ? dimC : array.get(bColArr, i)
+        tfC    = array.get(tfCols,  i)
+        spdTxt = str.tostring(math.round(spd, 1)) + (spd < 2.0 ? "%!" : "%")
+        spdC   = spd < 2.0 ? wC : bC
+        tc(0, rw, array.get(tfLbls,  i), tfC, bg, sz,        text.align_left)
+        tc(1, rw, array.get(biasArr, i), bC,  bg, sz,        text.align_left)
+        tc(2, rw, array.get(initArr, i), bC,  bg, size.tiny, text.align_left)
+        tc(3, rw, str.tostring(sk) + skDot(sk), bC, bg, sz,  text.align_right)
+        tc(4, rw, spdTxt, spdC, bg, sz, text.align_right)
+

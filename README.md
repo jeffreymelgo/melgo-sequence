@@ -1,6 +1,7 @@
 # Melgo Sequence — Price Structure Classifier
 
-**Original work by Jeff Rey Melgo | @JeffMelgo on TradingView**  
+**Original work by Jeff Rey Melgo | @JeffMelgo on TradingView** 
+**Research: https://ssrn.com/abstract=6658238**
 Independent Researcher and System Developer | Cebu, Philippines
 
 ---

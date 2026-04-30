@@ -56,8 +56,10 @@ with 18,904 valid candles tested under controlled confluence conditions.
 All directional findings are tested with two-sided binomial tests and 
 Bonferroni correction for multiple comparisons.
 
-A formal research paper has been submitted to 
-**Technical Analysis of Stocks & Commodities** magazine for consideration.
+A formal research paper is under editorial consideration at
+**Technical Analysis of Stocks & Commodities** magazine.
+The full statistical paper is publicly available at
+**[SSRN Abstract ID 6658238](https://ssrn.com/abstract=6658238)**.
 
 ---
 
